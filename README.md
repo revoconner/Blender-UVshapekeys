@@ -23,5 +23,4 @@ Demo video on Youtube (no sound) here: https://youtu.be/wxlkXQNb7uE
 v1.0 Initial Commit
 
 ## Roadmap
-1. Add real time changes
-2. Add "keep offset value" to enable real time changes based on offset values.
+1. Add more than one target meshes support. 
