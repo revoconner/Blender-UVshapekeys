@@ -21,6 +21,7 @@ Demo video on Youtube (no sound) here: https://youtu.be/wxlkXQNb7uE
 
 ## Changelog
 v1.0 Initial Commit
+v2.0 Added multiple target support. 
 
 ## Roadmap
-1. Add more than one target meshes support. 
+None for now.
