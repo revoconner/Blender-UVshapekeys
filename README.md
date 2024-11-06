@@ -20,8 +20,9 @@ Demo video on Youtube (no sound) here: https://youtu.be/wxlkXQNb7uE
 
 
 ## Changelog
-v1.0 Initial Commit
-v2.0 Added multiple target support. 
+1. v1.0 Initial Commit
+2. v2.0 Added multiple target support.
+3. v2.1 Bug fixes
 
 ## Roadmap
 None for now.
