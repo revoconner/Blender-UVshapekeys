@@ -1,7 +1,7 @@
 bl_info = {
     "name": "UV ShapeKeys",
     "author": "Rév",
-    "version": (2, 0),
+    "version": (2, 1),
     "blender": (4, 0, 0),
     "location": "Properties > Object Data > UV Shape Keys",
     "description": "Creates shapekeys based on UV coordinates",
@@ -148,13 +148,12 @@ class UpdateUVShapeKeys(Operator):
         final_coords = original_coords.copy()
         source_uv_map = get_uv_vertex_map(obj)
         
-        # Initialize arrays for storing deformations
-        vertex_deltas = np.zeros_like(original_coords)
-        vertex_counts = np.zeros(len(original_coords))
+        # Dictionary to store all deltas and their respective values for each vertex
+        vertex_deltas = {i: {'deltas': [], 'values': []} for i in range(len(original_coords))}
         
         # Calculate deltas from all targets
         for target in settings.targets:
-            if not target.mesh or target.value == 0.0:
+            if not target.mesh or abs(target.value) < 1e-6:  # Skip if value is effectively zero
                 continue
                 
             target_uv_map = get_uv_vertex_map(target.mesh)
@@ -172,16 +171,50 @@ class UpdateUVShapeKeys(Operator):
                     
                     for source_vert in source_verts:
                         for target_vert in target_verts:
-                            # Calculate direct delta between base and target positions
+                            # Calculate raw delta and store with its value
                             delta = target_coords[target_vert] - original_coords[source_vert]
-                            vertex_deltas[source_vert] += delta * target.value
-                            vertex_counts[source_vert] += 1
+                            # Only store if the delta is significant
+                            if np.any(np.abs(delta) > 1e-6):
+                                vertex_deltas[source_vert]['deltas'].append(delta)
+                                vertex_deltas[source_vert]['values'].append(target.value)
 
-        # Apply averaged deltas to get final positions
-        for i in range(len(final_coords)):
-            if vertex_counts[i] > 0:
-                # Average the deltas if multiple targets affect the same vertex
-                final_coords[i] = original_coords[i] + (vertex_deltas[i] / vertex_counts[i])
+        # Process the deltas for each vertex
+        for vert_idx, data in vertex_deltas.items():
+            if not data['deltas']:
+                continue
+                
+            deltas_array = np.array(data['deltas'])
+            values_array = np.array(data['values'])
+            
+            # Process each dimension (x, y, z) separately
+            for dim in range(3):
+                dim_deltas = deltas_array[:, dim]
+                
+                # Skip if no significant deltas
+                if not np.any(np.abs(dim_deltas) > 1e-6):
+                    continue
+                
+                # Group similar deltas (within tolerance)
+                tolerance = 1e-5
+                unique_groups = {}
+                
+                for delta, value in zip(dim_deltas, values_array):
+                    found_group = False
+                    for group_delta in unique_groups:
+                        if abs(delta - group_delta) < tolerance:
+                            unique_groups[group_delta].append(value)
+                            found_group = True
+                            break
+                    if not found_group:
+                        unique_groups[delta] = [value]
+                
+                # Calculate final delta for this dimension
+                final_delta = 0
+                for delta, values in unique_groups.items():
+                    # For similar deltas, use the maximum value
+                    final_delta += delta * max(values)
+                
+                final_coords[vert_idx][dim] = original_coords[vert_idx][dim] + final_delta
 
         # Update mesh vertices
         for i, coord in enumerate(final_coords):
