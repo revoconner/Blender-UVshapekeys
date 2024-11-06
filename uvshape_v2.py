@@ -1,7 +1,7 @@
 bl_info = {
     "name": "UV ShapeKeys",
     "author": "Rév",
-    "version": (1, 0),
+    "version": (2, 0),
     "blender": (4, 0, 0),
     "location": "Properties > Object Data > UV Shape Keys",
     "description": "Creates shapekeys based on UV coordinates",
@@ -27,10 +27,7 @@ def mesh_update_callback(self, context):
     return None
 
 def target_mesh_update_callback(self, context):
-    global monitored_objects
-    # Register new mesh for monitoring
     if self.mesh:
-        monitored_objects[self.name] = self.mesh
         # Force an update
         bpy.ops.object.update_uv_shape_keys()
     return None
@@ -51,15 +48,15 @@ class UVShapeKeyTarget(PropertyGroup):
         default=0.0,
         update=mesh_update_callback
     )
-    store_original: BoolProperty(default=False)  # To store if we've saved original coords
-    original_coords: CollectionProperty(type=PropertyGroup)  # To store original coordinates
+    store_original: BoolProperty(default=False)
+    original_coords: CollectionProperty(type=PropertyGroup)
 
 class UVShapeKeySettings(PropertyGroup):
     """Settings for UV shape keys"""
     targets: CollectionProperty(type=UVShapeKeyTarget)
     active_target_index: IntProperty()
-    base_coords: CollectionProperty(type=PropertyGroup)  # To store base mesh coordinates
-    initialized: BoolProperty(default=False)  # To track if we've stored base coordinates
+    base_coords: CollectionProperty(type=PropertyGroup)
+    initialized: BoolProperty(default=False)
 
 class UV_PT_ShapeKeys(Panel):
     bl_label = "UV Shape Keys"
@@ -76,18 +73,15 @@ class UV_PT_ShapeKeys(Panel):
         layout = self.layout
         settings = context.object.uv_shape_key_settings
 
-        # Draw the target list
         row = layout.row()
         row.template_list("UI_UL_list", "uv_shape_key_targets",
                          settings, "targets",
                          settings, "active_target_index")
 
-        # Add/Remove target buttons
         col = row.column(align=True)
         col.operator("object.uv_shape_key_target_add", icon='ADD', text="")
         col.operator("object.uv_shape_key_target_remove", icon='REMOVE', text="")
 
-        # Draw active target properties
         if len(settings.targets) > 0 and settings.active_target_index < len(settings.targets):
             target = settings.targets[settings.active_target_index]
             layout.prop(target, "mesh")
@@ -98,7 +92,7 @@ def store_coordinates(coords_collection, vertices):
     coords_collection.clear()
     for v in vertices:
         item = coords_collection.add()
-        item.name = str(tuple(v.co))  # Store as string since we can't store Vector directly
+        item.name = str(tuple(v.co))
 
 def get_coordinates(coords_collection):
     """Get coordinates from a property collection"""
@@ -154,14 +148,17 @@ class UpdateUVShapeKeys(Operator):
         final_coords = original_coords.copy()
         source_uv_map = get_uv_vertex_map(obj)
         
-        # Process each target
+        # Initialize arrays for storing deformations
+        vertex_deltas = np.zeros_like(original_coords)
+        vertex_counts = np.zeros(len(original_coords))
+        
+        # Calculate deltas from all targets
         for target in settings.targets:
             if not target.mesh or target.value == 0.0:
                 continue
                 
             target_uv_map = get_uv_vertex_map(target.mesh)
             
-            # Store target's original coordinates if not already stored
             if not target.store_original:
                 store_coordinates(target.original_coords, target.mesh.data.vertices)
                 target.store_original = True
@@ -173,13 +170,18 @@ class UpdateUVShapeKeys(Operator):
                 if uv_coord in target_uv_map:
                     target_verts = target_uv_map[uv_coord]
                     
-                    # Apply deformation
                     for source_vert in source_verts:
                         for target_vert in target_verts:
-                            # Calculate the full delta between base and target positions
+                            # Calculate direct delta between base and target positions
                             delta = target_coords[target_vert] - original_coords[source_vert]
-                            # Apply the weighted delta to the current position
-                            final_coords[source_vert] = original_coords[source_vert] + (delta * target.value)
+                            vertex_deltas[source_vert] += delta * target.value
+                            vertex_counts[source_vert] += 1
+
+        # Apply averaged deltas to get final positions
+        for i in range(len(final_coords)):
+            if vertex_counts[i] > 0:
+                # Average the deltas if multiple targets affect the same vertex
+                final_coords[i] = original_coords[i] + (vertex_deltas[i] / vertex_counts[i])
 
         # Update mesh vertices
         for i, coord in enumerate(final_coords):
@@ -211,7 +213,7 @@ class RemoveUVShapeKeyTarget(Operator):
         settings.targets.remove(settings.active_target_index)
         settings.active_target_index = min(settings.active_target_index,
                                          len(settings.targets) - 1)
-        # Reset mesh to base coordinates
+        # Reset mesh to base coordinates and reapply remaining targets
         bpy.ops.object.update_uv_shape_keys()
         return {'FINISHED'}
 
