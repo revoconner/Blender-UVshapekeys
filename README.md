@@ -1,4 +1,5 @@
 # Blender UVshapekeys
+### only works on blender 4.2 or above
 Blender shapekeys based on UV layout, instead of vertex ID (can have different vertex numbers).
 
 Takes the shapekeys corresponding vertices based on UV coordinates instead of vertex ID.
