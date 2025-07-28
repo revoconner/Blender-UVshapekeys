@@ -102,7 +102,7 @@ class UV_PT_ShapeKeys(Panel):
             box.label(text="Warning:", icon='INFO')
             box.label(text="This will permanently apply")
             box.label(text="the current deformation to")
-            box.label(text="the mesh and reset all values.")
+            box.label(text="the mesh and remove all targets.")
 
 def store_coordinates(coords_collection, vertices):
     """Store coordinates in a property collection"""
@@ -245,7 +245,7 @@ class SaveUVShapeDeformation(Operator):
     """Save the current UV shape key deformation permanently to the mesh"""
     bl_idname = "object.save_uv_shape_deformation"
     bl_label = "Save Deformation to Mesh"
-    bl_description = "Permanently apply the current deformation to the mesh and reset all target values"
+    bl_description = "Permanently apply the current deformation to the mesh and remove all targets"
     bl_options = {'REGISTER', 'UNDO'}
 
     @classmethod
@@ -275,14 +275,13 @@ class SaveUVShapeDeformation(Operator):
         # Store the current deformed coordinates as the new base
         store_coordinates(settings.base_coords, obj.data.vertices)
         
-        # Reset all target values to 0
-        for target in settings.targets:
-            target.value = 0.0
+        # Clear all targets completely
+        settings.targets.clear()
+        settings.active_target_index = 0
         
-        # Update the mesh one more time to ensure consistency
-        bpy.ops.object.update_uv_shape_keys()
+        # The mesh is already in the deformed state, no need to update again
         
-        self.report({'INFO'}, "Deformation saved to mesh successfully")
+        self.report({'INFO'}, "Deformation saved to mesh and all targets removed")
         return {'FINISHED'}
 
 class ResetUVShapeKeys(Operator):
@@ -398,6 +397,10 @@ class UV_PT_ShapeKeys_Enhanced(Panel):
                 if target.mesh and abs(target.value) > 1e-6:
                     row = box.row()
                     row.label(text=f"• {target.name}: {target.value:.3f}")
+            
+            # Warning about save behavior
+            box.separator()
+            box.label(text="Note: Saving will remove all targets", icon='ERROR')
 
 classes = (
     UVShapeKeyTarget,
