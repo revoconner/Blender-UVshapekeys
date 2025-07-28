@@ -1,7 +1,7 @@
 bl_info = {
     "name": "UV ShapeKeys",
     "author": "Rév",
-    "version": (2, 1),
+    "version": (2, 2),
     "blender": (4, 0, 0),
     "location": "Properties > Object Data > UV Shape Keys",
     "description": "Creates shapekeys based on UV coordinates",
@@ -86,6 +86,23 @@ class UV_PT_ShapeKeys(Panel):
             target = settings.targets[settings.active_target_index]
             layout.prop(target, "mesh")
             layout.prop(target, "value", slider=True)
+
+        # Add save deformation section
+        layout.separator()
+        
+        # Check if there are any active deformations
+        has_active_deformation = any(abs(target.value) > 1e-6 for target in settings.targets if target.mesh)
+        
+        row = layout.row()
+        row.enabled = has_active_deformation
+        row.operator("object.save_uv_shape_deformation", icon='FILE_TICK')
+        
+        if has_active_deformation:
+            box = layout.box()
+            box.label(text="Warning:", icon='INFO')
+            box.label(text="This will permanently apply")
+            box.label(text="the current deformation to")
+            box.label(text="the mesh and reset all values.")
 
 def store_coordinates(coords_collection, vertices):
     """Store coordinates in a property collection"""
@@ -224,6 +241,79 @@ class UpdateUVShapeKeys(Operator):
         
         return {'FINISHED'}
 
+class SaveUVShapeDeformation(Operator):
+    """Save the current UV shape key deformation permanently to the mesh"""
+    bl_idname = "object.save_uv_shape_deformation"
+    bl_label = "Save Deformation to Mesh"
+    bl_description = "Permanently apply the current deformation to the mesh and reset all target values"
+    bl_options = {'REGISTER', 'UNDO'}
+
+    @classmethod
+    def poll(cls, context):
+        obj = context.object
+        if not obj or obj.type != 'MESH':
+            return False
+        settings = obj.uv_shape_key_settings
+        # Only enable if there are active deformations
+        return any(abs(target.value) > 1e-6 for target in settings.targets if target.mesh)
+
+    def invoke(self, context, event):
+        # Show confirmation dialog
+        return context.window_manager.invoke_confirm(self, event)
+
+    def execute(self, context):
+        obj = context.object
+        settings = obj.uv_shape_key_settings
+        
+        if not obj or not obj.data.vertices:
+            self.report({'ERROR'}, "No valid mesh object")
+            return {'CANCELLED'}
+
+        # First, make sure the current deformation is applied
+        bpy.ops.object.update_uv_shape_keys()
+        
+        # Store the current deformed coordinates as the new base
+        store_coordinates(settings.base_coords, obj.data.vertices)
+        
+        # Reset all target values to 0
+        for target in settings.targets:
+            target.value = 0.0
+        
+        # Update the mesh one more time to ensure consistency
+        bpy.ops.object.update_uv_shape_keys()
+        
+        self.report({'INFO'}, "Deformation saved to mesh successfully")
+        return {'FINISHED'}
+
+class ResetUVShapeKeys(Operator):
+    """Reset all UV shape key values and restore original mesh"""
+    bl_idname = "object.reset_uv_shape_keys"
+    bl_label = "Reset All Values"
+    bl_description = "Reset all target values to 0 and restore the original mesh shape"
+    bl_options = {'REGISTER', 'UNDO'}
+
+    @classmethod
+    def poll(cls, context):
+        obj = context.object
+        if not obj or obj.type != 'MESH':
+            return False
+        settings = obj.uv_shape_key_settings
+        return settings.initialized and len(settings.targets) > 0
+
+    def execute(self, context):
+        obj = context.object
+        settings = obj.uv_shape_key_settings
+        
+        # Reset all target values
+        for target in settings.targets:
+            target.value = 0.0
+        
+        # Update to restore original shape
+        bpy.ops.object.update_uv_shape_keys()
+        
+        self.report({'INFO'}, "All UV shape key values reset")
+        return {'FINISHED'}
+
 class AddUVShapeKeyTarget(Operator):
     """Add a new UV shape key target"""
     bl_idname = "object.uv_shape_key_target_add"
@@ -250,11 +340,72 @@ class RemoveUVShapeKeyTarget(Operator):
         bpy.ops.object.update_uv_shape_keys()
         return {'FINISHED'}
 
+# Enhanced UI Panel
+class UV_PT_ShapeKeys_Enhanced(Panel):
+    bl_label = "UV Shape Keys"
+    bl_idname = "UV_PT_shape_keys_enhanced"
+    bl_space_type = 'PROPERTIES'
+    bl_region_type = 'WINDOW'
+    bl_context = "data"
+
+    @classmethod
+    def poll(cls, context):
+        return context.object and context.object.type == 'MESH'
+
+    def draw(self, context):
+        layout = self.layout
+        settings = context.object.uv_shape_key_settings
+
+        # Target list
+        row = layout.row()
+        row.template_list("UI_UL_list", "uv_shape_key_targets",
+                         settings, "targets",
+                         settings, "active_target_index")
+
+        col = row.column(align=True)
+        col.operator("object.uv_shape_key_target_add", icon='ADD', text="")
+        col.operator("object.uv_shape_key_target_remove", icon='REMOVE', text="")
+
+        # Target properties
+        if len(settings.targets) > 0 and settings.active_target_index < len(settings.targets):
+            target = settings.targets[settings.active_target_index]
+            layout.prop(target, "mesh")
+            layout.prop(target, "value", slider=True)
+
+        # Control buttons section
+        layout.separator()
+        
+        # Check if there are any active deformations
+        has_active_deformation = any(abs(target.value) > 1e-6 for target in settings.targets if target.mesh)
+        has_targets = len(settings.targets) > 0 and settings.initialized
+        
+        # Save deformation button
+        row = layout.row()
+        row.scale_y = 1.2
+        row.enabled = has_active_deformation
+        row.operator("object.save_uv_shape_deformation", icon='FILE_TICK')
+        
+        # Reset button
+        row = layout.row()
+        row.enabled = has_targets
+        row.operator("object.reset_uv_shape_keys", icon='LOOP_BACK')
+        
+        # Information box
+        if has_active_deformation:
+            box = layout.box()
+            box.label(text="Active Deformations:", icon='INFO')
+            for i, target in enumerate(settings.targets):
+                if target.mesh and abs(target.value) > 1e-6:
+                    row = box.row()
+                    row.label(text=f"• {target.name}: {target.value:.3f}")
+
 classes = (
     UVShapeKeyTarget,
     UVShapeKeySettings,
-    UV_PT_ShapeKeys,
+    UV_PT_ShapeKeys_Enhanced,
     UpdateUVShapeKeys,
+    SaveUVShapeDeformation,
+    ResetUVShapeKeys,
     AddUVShapeKeyTarget,
     RemoveUVShapeKeyTarget,
 )
